@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Universal Rubik's Cube (Stable Solve Function)</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #151515;
+            perspective: 1500px;
+            font-family: 'Segoe UI', sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            color: #eee;
+            padding: 15px;
+            background-color: rgba(30, 30, 30, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 250px;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        select {
+            padding: 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            width: 100%;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        button {
+            flex: 1;
+            padding: 10px;
+            background: #4CAF50;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 4px;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        .info {
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.4;
+            border-top: 1px solid #444;
+            padding-top: 10px;
+        }
+
+        .layer-input-box {
+            background-color: #A00000;
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        /* The 3D Scene */
+        .scene {
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.5s ease;
+        }
+
+        .cube-container {
+            position: relative;
+            transform-style: preserve-3d;
+            transform: rotateX(-30deg) rotateY(-45deg);
+        }
+
+        .cubie {
+            position: absolute;
+            box-sizing: border-box;
+            transform-style: preserve-3d;
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            box-shadow: inset 0 0 0 2px #000;
+            border-radius: 10%;
+        }
+
+        /* Colors */
+        .face.U {
+            background: #FFFFFF;
+        }
+
+        .face.D {
+            background: #FFD500;
+        }
+
+        .face.L {
+            background: #FF5800;
+        }
+
+        .face.R {
+            background: #B90000;
+        }
+
+        .face.F {
+            background: #009E60;
+        }
+
+        .face.B {
+            background: #0051BA;
+        }
+
+        .face.black {
+            background: #080808;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="ui">
+        <label for="sizeSelect" style="font-weight:bold; color:#fff;">Cube Size (N):</label>
+        <select id="sizeSelect">
+            <option value="2">2 x 2</option>
+            <option value="3" selected>3 x 3</option>
+            <option value="4">4 x 4</option>
+            <option value="5">5 x 5</option>
+            <option value="6">6 x 6</option>
+            <option value="7">7 x 7</option>
+            <option value="8">8 x 8</option>
+            <option value="9">9 x 9</option>
+            <option value="10">10 x 10</option>
+        </select>
+
+        <div class="control-group">
+            <button id="scramble">Scramble (Full Random)</button>
+            <button id="solve">Solve</button>
+        </div>
+
+        <div class="info">
+            Layer Controls (The Fixed Way):<br>
+            1. Press a **Number** (1-9) for the layer index.<br>
+            2. Press a **Face Key** (R, L, U, D, F, B).<br>
+            3. Use **Shift** for a reverse (') move.<br>
+            <br>
+            Current Layer Selected: <span id="currentLayer" class="layer-input-box">1</span>
+        </div>
+    </div>
+
+    <div class="scene" id="scene">
+        <div class="cube-container" id="cube"></div>
+    </div>
+
+    <script>
+        const cubeContainer = document.getElementById("cube");
+        const scene = document.getElementById("scene");
+        const sizeSelect = document.getElementById("sizeSelect");
+        const currentLayerSpan = document.getElementById("currentLayer");
+
+        // Configuration
+        const CUBIE_SIZE = 50;
+        let currentSize = 3;
+        let cubies = [];
+
+        // State
+        let isAnimating = false;
+        let isDragging = false;
+        let startX, startY;
+        let rotX = -30, rotY = -45;
+        let queue = [];
+        let moveHistory = [];
+        let currentLayer = 1; // Default layer selection
+
+        // --- 1. CUBE GENERATION ---
+
+        function createCube(n) {
+            if (n < 2) n = 2;
+
+            cubeContainer.innerHTML = '';
+            cubies = [];
+            currentSize = n;
+            currentLayer = 1; // Reset layer on size change
+            currentLayerSpan.textContent = 1;
+
+            const scale = 3 / Math.max(3, n * 0.8);
+            scene.style.transform = `scale(${scale})`;
+
+            const offset = (n - 1) / 2;
+
+            for (let x = 0; x < n; x++) {
+                for (let y = 0; y < n; y++) {
+                    for (let z = 0; z < n; z++) {
+                        const c = document.createElement("div");
+                        c.classList.add("cubie");
+                        c.style.width = CUBIE_SIZE + "px";
+                        c.style.height = CUBIE_SIZE + "px";
+
+                        const tx = (x - offset) * CUBIE_SIZE;
+                        const ty = (y - offset) * CUBIE_SIZE;
+                        const tz = (z - offset) * CUBIE_SIZE;
+
+                        c.style.transform = `translate3d(${tx}px, ${ty}px, ${tz}px)`;
+
+                        const faces = ["U", "D", "L", "R", "F", "B"];
+                        faces.forEach(f => {
+                            const face = document.createElement("div");
+                            let isExterior = false;
+
+                            if (f === "L" && x === 0) isExterior = true;
+                            if (f === "R" && x === n - 1) isExterior = true;
+                            if (f === "U" && y === 0) isExterior = true;
+                            if (f === "D" && y === n - 1) isExterior = true;
+                            if (f === "B" && z === 0) isExterior = true;
+                            if (f === "F" && z === n - 1) isExterior = true;
+
+                            face.className = isExterior ? `face ${f}` : "face black";
+
+                            const d = CUBIE_SIZE / 2;
+                            if (f === 'U') face.style.transform = `rotateX(90deg) translateZ(${d}px)`;
+                            if (f === 'D') face.style.transform = `rotateX(-90deg) translateZ(${d}px)`;
+                            if (f === 'L') face.style.transform = `rotateY(-90deg) translateZ(${d}px)`;
+                            if (f === 'R') face.style.transform = `rotateY(90deg) translateZ(${d}px)`;
+                            if (f === 'F') face.style.transform = `translateZ(${d}px)`;
+                            if (f === 'B') face.style.transform = `rotateY(180deg) translateZ(${d}px)`;
+
+                            c.appendChild(face);
+                        });
+
+                        cubeContainer.appendChild(c);
+                        cubies.push(c);
+                    }
+                }
+            }
+        }
+
+        // --- 2. ROTATION LOGIC ---
+
+        function getCubiesInLayer(axis, layerIndex) {
+            const offset = (currentSize - 1) / 2;
+            const targetCoord = (layerIndex - offset) * CUBIE_SIZE;
+
+            // Round the target coordinate to ensure perfect comparison
+            const roundedTargetCoord = Math.round(targetCoord);
+
+            return cubies.filter(c => {
+                const style = window.getComputedStyle(c);
+                const matrix = new DOMMatrixReadOnly(style.transform);
+                let val;
+                if (axis === 'x') val = matrix.m41;
+                if (axis === 'y') val = matrix.m42;
+                if (axis === 'z') val = matrix.m43;
+
+                // Use a high tolerance (e.g., 5 units) and round the current value.
+                return Math.abs(Math.round(val) - roundedTargetCoord) < 5;
+            });
+        }
+
+        /**
+         * Core rotation function
+         */
+        function rotateLayer(move, cb) {
+            if (isAnimating && !cb) {
+                queue.push(move);
+                return;
+            }
+            isAnimating = true;
+
+            let face, layerNumber, isPrime;
+
+            // Regex pattern: (\d*) captures the layer number (optional, e.g., "2"), (\w) captures the face (e.g., "R"), ('?) captures the prime (optional)
+            const match = move.match(/^(\d*)([UDRFLB])(2?)('?)$/);
+            if (!match) {
+                isAnimating = false;
+                return;
+            }
+
+            layerNumber = match[1] === '' ? 1 : parseInt(match[1]);
+            face = match[2];
+            const isDouble = match[3] === '2'; // Check for "2"
+            isPrime = match[4] === "'";
+
+            // 180 degree moves are neither prime nor normal, so we check if it's double
+            const dir = isDouble ? 2 : (isPrime ? -1 : 1);
+
+            if (layerNumber < 1 || layerNumber > currentSize) {
+                isAnimating = false;
+                console.warn(`Layer ${layerNumber} is out of bounds for a ${currentSize}x${currentSize} cube.`);
+                return;
+            }
+
+            let axis, layerIndex, angle;
+
+            if (face === 'L' || face === 'B' || face === 'U') {
+                layerIndex = layerNumber - 1;
+            } else { // R, D, F
+                layerIndex = currentSize - layerNumber;
+            }
+
+            if (face === 'L' || face === 'R') axis = 'x';
+            if (face === 'U' || face === 'D') axis = 'y';
+            if (face === 'F' || face === 'B') axis = 'z';
+
+            if (face === 'U') angle = 90 * dir;
+            if (face === 'D') angle = -90 * dir;
+            if (face === 'R') angle = -90 * dir;
+            if (face === 'L') angle = 90 * dir;
+            if (face === 'F') angle = 90 * dir;
+            if (face === 'B') angle = -90 * dir;
+
+            const activeCubies = getCubiesInLayer(axis, layerIndex);
+
+            const rotMat = new DOMMatrix();
+            if (axis === 'x') rotMat.rotateSelf(angle, 0, 0);
+            if (axis === 'y') rotMat.rotateSelf(0, angle, 0);
+            if (axis === 'z') rotMat.rotateSelf(0, 0, angle);
+
+            activeCubies.forEach(c => {
+                const currentMat = new DOMMatrixReadOnly(window.getComputedStyle(c).transform);
+                const newMat = rotMat.multiply(currentMat);
+                c.style.transform = newMat.toString();
+            });
+
+            // Store the move string as it was passed to the function
+            if (!cb) moveHistory.push(move);
+
+            // Time matches the CSS transition time
+            setTimeout(() => {
+                isAnimating = false;
+                if (cb) cb();
+                else if (queue.length > 0) {
+                    rotateLayer(queue.shift());
+                }
+            }, 450);
+        }
+
+        // --- 3. INPUT HANDLING ---
+
+        // Drag to rotate view (unchanged)
+        document.addEventListener("mousedown", (e) => {
+            if (e.target.tagName === "BUTTON" || e.target.tagName === "SELECT") return;
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            document.body.style.cursor = "grabbing";
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            rotY += dx * 0.5;
+            rotX -= dy * 0.5;
+            cubeContainer.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+            startX = e.clientX;
+            startY = e.clientY;
+        });
+
+        document.addEventListener("mouseup", () => {
+            isDragging = false;
+            document.body.style.cursor = "default";
+        });
+
+        // Keyboard (Layer Persistence)
+        window.addEventListener("keydown", (e) => {
+            const key = e.key.toUpperCase();
+            const baseFaces = ["R", "L", "U", "D", "F", "B"];
+            const number = parseInt(e.key);
+
+            // 1. Handle Number Key Input (Setting the Layer)
+            if (!isNaN(number) && number >= 1 && number <= currentSize) {
+                currentLayer = number;
+                currentLayerSpan.textContent = number;
+                return;
+            } else if (!isNaN(number) && (number > currentSize || number === 0)) {
+                // Invalid layer flash
+                currentLayerSpan.textContent = `${number} (Max ${currentSize})`;
+                setTimeout(() => currentLayerSpan.textContent = currentLayer, 500);
+                return;
+            }
+
+
+            // 2. Handle Face Key Input (Executing the Move)
+            if (baseFaces.includes(key)) {
+
+                let layerToMove = currentLayer;
+
+                // Handle 180-degree moves (key '2' on the main keyboard, NOT Numpad 2)
+                let doubleMove = e.code === 'Digit2' || e.code === 'Numpad2' ? "2" : "";
+
+                // Determine if it's a prime move (Shift)
+                let prime = e.shiftKey && doubleMove === "" ? "'" : "";
+
+                // Construct the move string (e.g., "3R" or "2F'")
+                let move = layerToMove.toString() + key + doubleMove + prime;
+
+                rotateLayer(move);
+            }
+        });
+
+        // UI Controls
+        sizeSelect.addEventListener("change", (e) => {
+            moveHistory = [];
+            queue = [];
+            isAnimating = false;
+            currentLayer = 1; // Reset layer on size change
+            createCube(parseInt(e.target.value));
+        });
+
+        // --- 4. SCRAMBLE/SOLVE LOGIC (FIXED) ---
+
+        const baseFaces = ["U", "D", "L", "R", "F", "B"];
+
+        document.getElementById("scramble").onclick = () => {
+            if (isAnimating) return;
+
+            moveHistory = [];
+            queue = [];
+
+            const scrambleLength = currentSize < 5 ? 25 : 40;
+
+            for (let i = 0; i < scrambleLength; i++) {
+                const face = baseFaces[Math.floor(Math.random() * baseFaces.length)];
+
+                const maxLayer = Math.floor(currentSize / 2) + 1;
+                const layerNumber = Math.floor(Math.random() * maxLayer) + 1;
+
+                const isPrime = Math.random() < 0.5 ? "'" : "";
+                const doubleMove = Math.random() < 0.15 ? "2" : "";
+
+                queue.push(layerNumber + face + doubleMove + isPrime);
+            }
+
+            rotateLayer(queue.shift());
+        };
+
+        document.getElementById("solve").onclick = () => {
+            if (isAnimating || moveHistory.length === 0) return;
+            queue = [];
+
+            // Invert history
+            const solveSequence = [...moveHistory].reverse().map(move => {
+                // Updated Regex: (^(\d*)) captures Layer Num, ([UDRFLB]) captures Face, (2?) captures Double, ('?) captures Prime
+                const match = move.match(/^(\d*)([UDRFLB])(2?)('?)$/);
+                if (!match) return move; // Fallback, though should be caught by logic above.
+
+                const layer = match[1]; // Layer number (can be empty string for 1, or the number)
+                const face = match[2];
+                const isDouble = match[3] === '2';
+                const isPrime = match[4] === "'";
+
+                let inverseMove = layer + face;
+
+                if (isDouble) {
+                    // 180-degree move: the inverse is the same move
+                    inverseMove += '2';
+                } else {
+                    // 90-degree move: invert the direction
+                    inverseMove += isPrime ? "" : "'";
+                }
+
+                return inverseMove;
+            });
+            moveHistory = [];
+
+            function playNext() {
+                if (solveSequence.length === 0) return;
+                rotateLayer(solveSequence.shift(), playNext);
+            }
+            playNext();
+        };
+
+        // Initialize
+        createCube(3);
+
+    </script>
+</body>
+
+</html>
